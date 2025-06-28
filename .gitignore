@@ -1,0 +1,5 @@
+.venv
+*.pdf
+.env
+!uploads/asa_policy.pdf
+__pycache__
