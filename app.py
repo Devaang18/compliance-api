@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import fitz  # PyMuPDF
 import os
 import google.generativeai as genai
@@ -35,6 +35,11 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # --- In-memory cache of policy texts ---
 policy_texts = []
+
+# --- Serve index.html at root ---
+@app.route("/")
+def serve_index():
+    return send_from_directory("static", "index.html")
 
 # --- Utility: Extract text from PDF ---
 def extract_text_from_pdf(file_obj):
