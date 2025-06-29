@@ -142,9 +142,12 @@ If there are no violations, the "violations" array should be empty and "is_compl
         print(f"Error: {e}")
         return jsonify({"error": "Internal error during compliance check."}), 500
 
+
+@app.before_first_request
+def initialize_database():
+    db.create_all()
+    load_policies_on_startup()
+
 # --- Initialize DB and load policies on startup ---
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-        load_policies_on_startup()
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
