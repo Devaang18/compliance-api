@@ -1,120 +1,104 @@
-from flask import Flask, request, jsonify
-import fitz  # PyMuPDF
 import os
-import google.generativeai as genai
-import json
-from flask_cors import CORS
-from dotenv import load_dotenv
+import sqlite3
+from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-
-load_dotenv()  # Load env vars from .env locally
+from pdfminer.high_level import extract_text
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS fully
+app.config['UPLOAD_FOLDER'] = 'uploads'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    raise Exception("Missing GOOGLE_API_KEY environment variable!")
-genai.configure(api_key=API_KEY)
+DB_PATH = 'policies.db'
 
-UPLOAD_FOLDER = "./uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Initialize DB (create table if not exists)
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS policies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT UNIQUE,
+                text TEXT
+            )
+        ''')
+
+init_db()
 
 policy_texts = []
 
-def extract_text_from_pdf(file_obj):
-    if isinstance(file_obj, str):
-        doc = fitz.open(file_obj)
-    else:
-        file_obj.seek(0)
-        doc = fitz.open(stream=file_obj.read(), filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text() + "\n"
-    doc.close()
-    return text
-
-def load_policies_on_startup():
+def load_policy_texts():
     global policy_texts
-    policy_texts = []
-    for filename in os.listdir(UPLOAD_FOLDER):
-        if filename.lower().endswith(".pdf"):
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            text = extract_text_from_pdf(filepath)
-            policy_texts.append(text)
-    print(f"Loaded {len(policy_texts)} policy documents from {UPLOAD_FOLDER}")
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("SELECT filename, text FROM policies")
+        policy_texts = [{"filename": r[0], "text": r[1]} for r in cur.fetchall()]
+
+load_policy_texts()
+
+def extract_text_from_pdf(filepath):
+    return extract_text(filepath)
 
 @app.route('/upload_policy', methods=['POST'])
 def upload_policy():
-    global policy_texts
+    if 'files' not in request.files:
+        return jsonify({"error": "No file part"}), 400
 
     files = request.files.getlist('files')
-    if not files:
-        return jsonify({"error": "No files uploaded"}), 400
+    saved_count = 0
 
     for file in files:
-        filename = secure_filename(file.filename)  # sanitize filename
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
+        if file.filename == '':
+            continue
 
-    load_policies_on_startup()
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(save_path)
 
-    return jsonify({"message": f"{len(files)} policy documents uploaded and processed."})
+        try:
+            text = extract_text_from_pdf(save_path)
+        except Exception as e:
+            return jsonify({"error": f"Failed to extract text: {e}"}), 500
 
-@app.route('/check_document', methods=['POST', 'OPTIONS'])
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO policies (filename, text) VALUES (?, ?)
+            ''', (filename, text))
+        saved_count += 1
+
+    load_policy_texts()
+    return jsonify({"message": f"{saved_count} policy document(s) uploaded and processed."})
+
+@app.route('/check_document', methods=['POST'])
 def check_document():
-    if request.method == 'OPTIONS':
-        return '', 200
+    data = request.get_json()
+    if not data or 'document_text' not in data:
+        return jsonify({"error": "Missing 'document_text' in JSON body"}), 400
 
-    if not policy_texts:
-        return jsonify({"error": "No compliance policies uploaded. Please upload policies first."}), 400
+    doc_text = data['document_text'].lower()
 
-    try:
-        data = request.get_json()
-        user_text = data.get("document_text")
+    violations = []
+    for policy in policy_texts:
+        if policy["text"].lower() not in doc_text:
+            violations.append({
+                "rule_violated": f"Missing policy from {policy['filename']}",
+                "violating_text": "(text not found in document)",
+                "suggestion": "Include the policy text to comply."
+            })
 
-        if not user_text:
-            return jsonify({"error": "No document_text found in request."}), 400
+    return jsonify({
+        "compliance_report": {
+            "is_compliant": len(violations) == 0,
+            "violations": violations
+        }
+    })
 
-        combined_policy = "\n\n".join(policy_texts)
+# Serve frontend index.html
+@app.route('/')
+def serve_index():
+    return send_from_directory('static', 'index.html')
 
-        prompt = f"""
-You are an expert compliance officer. Analyze the user document for any violations only against the provided policies.
+# Serve other static files if needed (css/js/images)
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
 
-Policies:
-{combined_policy}
-
-User Document:
-{user_text}
-
-Return your analysis as a single, valid JSON object. Do not include any text or formatting like "```json".
-The JSON object must have a root key "compliance_report". The value should be an object with two keys:
-- "is_compliant": a boolean value (true or false).
-- "violations": an array of objects. Each object in the array should have:
-  - "rule_violated": a string describing the rule that was violated.
-  - "violating_text": a string containing the exact text from the document.
-  - "suggestion": a string suggesting a fix.
-
-If there are no violations, the "violations" array should be empty and "is_compliant" should be true.
-"""
-
-        model = genai.GenerativeModel("gemini-1.5-flash-latest")
-        generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
-
-        response = model.generate_content(prompt, generation_config=generation_config)
-
-        print("Raw response:", response.text)
-
-        report_data = json.loads(response.text)
-        return jsonify(report_data)
-
-    except json.JSONDecodeError:
-        return jsonify({"error": "Failed to decode JSON from AI response."}), 500
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": "Internal error during compliance check."}), 500
-
-if __name__ == "__main__":
-    load_policies_on_startup()
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+if __name__ == '__main__':
+    app.run(debug=True)
