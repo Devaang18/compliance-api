@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compliance Checker AI</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script>
+        // Configure Tailwind to use 'Inter' font
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        /* Custom styles for rounded corners and overall aesthetics */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Light gray background */
+        }
+        .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: #ffffff;
+            border-radius: 12px; /* More rounded corners */
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Soft shadow */
+        }
+        h1, h2 {
+            color: #1a202c; /* Darker text for headings */
+            margin-bottom: 1rem;
+        }
+        input[type="file"], textarea, button {
+            border-radius: 8px; /* Consistent rounded corners */
+            padding: 0.75rem;
+            font-size: 1rem;
+            border: 1px solid #cbd5e0; /* Light border */
+        }
+        button {
+            background-color: #4c51bf; /* Primary button color (indigo) */
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+        button:hover {
+            background-color: #667eea; /* Lighter indigo on hover */
+        }
+        .file-input-label {
+            display: block;
+            background-color: #edf2f7; /* Light gray for file input label */
+            padding: 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px dashed #a0aec0; /* Dashed border for file input */
+            text-align: center;
+            margin-bottom: 1rem;
+            color: #4a5568;
+        }
+        .file-input-label:hover {
+            background-color: #e2e8f0;
+        }
+        #policyFiles {
+            display: none; /* Hide default file input */
+        }
+        .policy-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px dashed #e2e8f0; /* Subtle separator */
+        }
+        .policy-item:last-child {
+            border-bottom: none;
+        }
+        .policy-item button {
+            padding: 0.3rem 0.6rem;
+            font-size: 0.875rem;
+            background-color: #ef4444; /* Red for delete button */
+        }
+        .policy-item button:hover {
+            background-color: #dc2626; /* Darker red on hover */
+        }
+        pre {
+            background-color: #f7fafc; /* Lighter background for code/report */
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            white-space: pre-wrap; /* Ensure text wraps */
+            word-wrap: break-word;
+            border: 1px solid #e2e8f0;
+        }
+        .message {
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        .success {
+            background-color: #d1fae5; /* Light green */
+            color: #065f46; /* Dark green text */
+        }
+        .error {
+            background-color: #fee2e2; /* Light red */
+            color: #991b1b; /* Dark red text */
+        }
+        .info {
+            background-color: #e0f2fe; /* Light blue */
+            color: #0c4a6e; /* Dark blue text */
+        }
+    </style>
+</head>
+<body class="font-sans antialiased text-gray-800">
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center mb-6">AI Compliance Checker</h1>
+
+        <section class="mb-8 p-6 bg-gray-50 rounded-lg shadow-inner">
+            <h2 class="text-2xl font-semibold mb-4">1. Upload Policy Documents (PDF)</h2>
+            <form id="uploadForm" class="space-y-4">
+                <label for="policyFiles" class="file-input-label">
+                    Click to select PDF files or drag & drop here
+                </label>
+                <input type="file" id="policyFiles" multiple accept=".pdf">
+                <button type="submit" class="w-full">Upload Policies</button>
+                <p id="uploadMessage" class="message hidden"></p>
+            </form>
+        </section>
+
+        <section class="mb-8 p-6 bg-gray-50 rounded-lg shadow-inner">
+            <h2 class="text-2xl font-semibold mb-4">2. Current Policies</h2>
+            <div id="policyList" class="space-y-2">
+                <p class="text-center text-gray-500">Loading policies...</p>
+            </div>
+            <p id="policyListMessage" class="message hidden mt-4"></p>
+        </section>
+
+        <section class="p-6 bg-gray-50 rounded-lg shadow-inner">
+            <h2 class="text-2xl font-semibold mb-4">3. Check Your Document for Compliance</h2>
+            <textarea id="documentText" rows="15" class="w-full border rounded-lg p-3 focus:ring focus:ring-indigo-300 focus:border-indigo-400" placeholder="Paste the document text you want to check for compliance here..."></textarea>
+            <button id="checkButton" class="w-full mt-4">Check Compliance</button>
+            <p id="checkMessage" class="message hidden"></p>
+            <div id="complianceReport" class="mt-6">
+                <h3 class="text-xl font-semibold mb-2">Compliance Report:</h3>
+                <pre id="reportContent" class="min-h-[100px] text-sm text-gray-700">Your compliance report will appear here after checking.</pre>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // API_BASE_URL is empty because Flask will serve this HTML,
+        // and API calls will be relative to the same host/port.
+        const API_BASE_URL = '';
+
+        // --- DOM Element References ---
+        const uploadForm = document.getElementById('uploadForm');
+        const policyFilesInput = document.getElementById('policyFiles');
+        const uploadMessage = document.getElementById('uploadMessage');
+        const policyListDiv = document.getElementById('policyList');
+        const policyListMessage = document.getElementById('policyListMessage');
+        const documentTextarea = document.getElementById('documentText');
+        const checkButton = document.getElementById('checkButton');
+        const checkMessage = document.getElementById('checkMessage');
+        const reportContent = document.getElementById('reportContent');
+        const fileInputLabel = document.querySelector('.file-input-label');
+
+        // --- Helper Function to Display Messages ---
+        function displayMessage(element, text, type) {
+            element.textContent = text;
+            element.className = `message ${type}`;
+            element.classList.remove('hidden');
+        }
+
+        function clearMessage(element) {
+            element.textContent = '';
+            element.className = 'message hidden';
+        }
+
+        // --- Policy Upload Logic ---
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearMessage(uploadMessage);
+            displayMessage(uploadMessage, 'Uploading policies...', 'info');
+
+            const formData = new FormData();
+            const files = policyFilesInput.files;
+
+            if (files.length === 0) {
+                displayMessage(uploadMessage, 'Please select PDF files to upload.', 'error');
+                return;
+            }
+
+            for (const file of files) {
+                formData.append('files', file);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/upload_policy`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    displayMessage(uploadMessage, data.message, data.errors ? 'info' : 'success');
+                    if (data.errors && data.errors.length > 0) {
+                        displayMessage(uploadMessage, data.message + ' ' + data.errors.join(', '), 'info');
+                    }
+                    fetchPolicies(); // Refresh the policy list
+                    policyFilesInput.value = ''; // Clear selected files
+                    fileInputLabel.textContent = 'Click to select PDF files or drag & drop here'; // Reset label
+                } else {
+                    displayMessage(uploadMessage, `Error: ${data.error || 'Unknown upload error.'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Network Error during upload:', error);
+                displayMessage(uploadMessage, `Network Error: ${error.message}. Please check server connection.`, 'error');
+            }
+        });
+
+        // Update file input label to show selected file names
+        policyFilesInput.addEventListener('change', () => {
+            if (policyFilesInput.files.length > 0) {
+                const fileNames = Array.from(policyFilesInput.files).map(file => file.name).join(', ');
+                fileInputLabel.textContent = `Selected: ${fileNames}`;
+            } else {
+                fileInputLabel.textContent = 'Click to select PDF files or drag & drop here';
+            }
+        });
+
+
+        // --- Fetch and Display Policies Logic ---
+        async function fetchPolicies() {
+            policyListDiv.innerHTML = '<p class="text-center text-gray-500">Loading policies...</p>';
+            clearMessage(policyListMessage);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_policies`);
+                const policies = await response.json();
+
+                if (response.ok) {
+                    policyListDiv.innerHTML = ''; // Clear loading message
+                    if (policies.length === 0) {
+                        policyListDiv.innerHTML = '<p class="text-center text-gray-500">No policies uploaded yet. Upload some above!</p>';
+                    } else {
+                        policies.forEach(policy => {
+                            const policyDiv = document.createElement('div');
+                            policyDiv.className = 'policy-item';
+                            policyDiv.innerHTML = `
+                                <span class="text-gray-700">${policy.filename}</span>
+                                <button data-id="${policy.id}">Delete</button>
+                            `;
+                            policyListDiv.appendChild(policyDiv);
+                        });
+                        // Add event listeners to delete buttons
+                        policyListDiv.querySelectorAll('button').forEach(button => {
+                            button.addEventListener('click', (e) => deletePolicy(e.target.dataset.id));
+                        });
+                    }
+                } else {
+                    displayMessage(policyListMessage, `Error fetching policies: ${policies.error || 'Unknown error.'}`, 'error');
+                    policyListDiv.innerHTML = `<p class="text-center text-red-500">Could not load policies.</p>`;
+                }
+            } catch (error) {
+                console.error('Network Error fetching policies:', error);
+                displayMessage(policyListMessage, `Network Error: ${error.message}. Cannot load policies.`, 'error');
+                policyListDiv.innerHTML = `<p class="text-center text-red-500">Network connection failed.</p>`;
+            }
+        }
+
+        // --- Delete Policy Logic ---
+        async function deletePolicy(policyId) {
+            // Replace standard confirm with a more custom UI if needed for production
+            if (!confirm('Are you sure you want to delete this policy? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/delete_policy/${policyId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(data.message); // Using alert for simplicity, replace with custom modal for production
+                    fetchPolicies(); // Refresh the policy list
+                } else {
+                    alert(`Error deleting policy: ${data.error || 'Unknown deletion error.'}`);
+                }
+            } catch (error) {
+                console.error('Network Error during delete:', error);
+                alert(`Network Error: ${error.message}. Failed to delete policy.`);
+            }
+        }
+
+        // --- Check Document for Compliance Logic ---
+        checkButton.addEventListener('click', async () => {
+            const documentText = documentTextarea.value.trim();
+            clearMessage(checkMessage);
+            reportContent.textContent = 'Checking document for compliance... Please wait.';
+            reportContent.classList.add('info'); // Add info styling for loading
+
+            if (!documentText) {
+                displayMessage(checkMessage, 'Please enter document text to check.', 'error');
+                reportContent.textContent = 'Your compliance report will appear here after checking.';
+                reportContent.classList.remove('info');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/check_document`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ document_text: documentText })
+                });
+                const data = await response.json();
+
+                reportContent.classList.remove('info'); // Remove info styling once response is back
+
+                if (response.ok) {
+                    if (data.compliance_report) {
+                        reportContent.textContent = JSON.stringify(data.compliance_report, null, 2);
+                        if (data.compliance_report.is_compliant) {
+                            displayMessage(checkMessage, 'Document is compliant! No violations found.', 'success');
+                        } else if (data.compliance_report.violations && data.compliance_report.violations.length > 0) {
+                            displayMessage(checkMessage, 'Violations found! See report below.', 'error');
+                        } else {
+                            // Fallback for unexpected valid JSON structure
+                            displayMessage(checkMessage, 'Compliance check completed, but report structure is unusual.', 'info');
+                        }
+                    } else {
+                         displayMessage(checkMessage, `API response missing 'compliance_report' key.`, 'error');
+                         reportContent.textContent = JSON.stringify(data, null, 2);
+                    }
+                } else {
+                    displayMessage(checkMessage, `Error: ${data.error || 'Unknown compliance check error.'}`, 'error');
+                    reportContent.textContent = JSON.stringify(data, null, 2); // Show raw error response
+                }
+            } catch (error) {
+                console.error('Network Error during compliance check:', error);
+                displayMessage(checkMessage, `Network Error: ${error.message}. Please check server connection.`, 'error');
+                reportContent.textContent = 'Failed to get report due to network error.';
+                reportContent.classList.remove('info');
+            }
+        });
+
+        // --- Initialize: Fetch policies when the page loads ---
+        document.addEventListener('DOMContentLoaded', fetchPolicies);
+    </script>
+</body>
+</html>
