@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compliance Checker AI</title>
     <!-- Tailwind CSS for modern styling -->
-    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
         // Configure Tailwind to use 'Inter' font
         tailwind.config = {
@@ -113,6 +113,42 @@
             background-color: #e0f2fe; /* Light blue */
             color: #0c4a6e; /* Dark blue text */
         }
+
+        /* Styles for the new compliance report display */
+        .compliance-summary {
+            font-size: 1.25rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .compliant-status {
+            background-color: #d1fae5; /* Light green for compliant */
+            color: #065f46;
+        }
+        .non-compliant-status {
+            background-color: #fee2e2; /* Light red for non-compliant */
+            color: #991b1b;
+        }
+        .violation-item {
+            background-color: #fef2f2; /* Very light red for individual violations */
+            border: 1px solid #fca5a5; /* Red border */
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .violation-item h4 {
+            font-weight: bold;
+            color: #b91c1c; /* Darker red for violation heading */
+            margin-bottom: 0.5rem;
+        }
+        .violation-item p {
+            margin-bottom: 0.5rem;
+        }
+        .violation-item p strong {
+            color: #4a5568;
+        }
     </style>
 </head>
 <body class="font-sans antialiased text-gray-800">
@@ -146,7 +182,9 @@
             <p id="checkMessage" class="message hidden"></p>
             <div id="complianceReport" class="mt-6">
                 <h3 class="text-xl font-semibold mb-2">Compliance Report:</h3>
-                <pre id="reportContent" class="min-h-[100px] text-sm text-gray-700">Your compliance report will appear here after checking.</pre>
+                <div id="reportContent" class="min-h-[100px] p-3 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg">
+                    Your compliance report will appear here after checking.
+                </div>
             </div>
         </section>
     </div>
@@ -165,7 +203,7 @@
         const documentTextarea = document.getElementById('documentText');
         const checkButton = document.getElementById('checkButton');
         const checkMessage = document.getElementById('checkMessage');
-        const reportContent = document.getElementById('reportContent');
+        const reportContentDiv = document.getElementById('reportContent'); // Changed from pre to div
         const fileInputLabel = document.querySelector('.file-input-label');
 
         // --- Helper Function to Display Messages ---
@@ -207,7 +245,11 @@
                 if (response.ok) {
                     displayMessage(uploadMessage, data.message, data.errors ? 'info' : 'success');
                     if (data.errors && data.errors.length > 0) {
-                        displayMessage(uploadMessage, data.message + ' ' + data.errors.join(', '), 'info');
+                        // Concatenate messages and errors if any
+                        const errorSummary = data.errors.length > 1
+                            ? `${data.errors.length} files had issues: ` + data.errors.join('; ')
+                            : data.errors[0];
+                        displayMessage(uploadMessage, `${data.message} ${errorSummary}`, 'info');
                     }
                     fetchPolicies(); // Refresh the policy list
                     policyFilesInput.value = ''; // Clear selected files
@@ -299,13 +341,13 @@
         checkButton.addEventListener('click', async () => {
             const documentText = documentTextarea.value.trim();
             clearMessage(checkMessage);
-            reportContent.textContent = 'Checking document for compliance... Please wait.';
-            reportContent.classList.add('info'); // Add info styling for loading
+            reportContentDiv.innerHTML = '<p class="text-center text-gray-500">Checking document for compliance... Please wait.</p>';
+            reportContentDiv.classList.add('info'); // Add info styling for loading
 
             if (!documentText) {
                 displayMessage(checkMessage, 'Please enter document text to check.', 'error');
-                reportContent.textContent = 'Your compliance report will appear here after checking.';
-                reportContent.classList.remove('info');
+                reportContentDiv.innerHTML = 'Your compliance report will appear here after checking.';
+                reportContentDiv.classList.remove('info');
                 return;
             }
 
@@ -319,34 +361,81 @@
                 });
                 const data = await response.json();
 
-                reportContent.classList.remove('info'); // Remove info styling once response is back
+                reportContentDiv.classList.remove('info'); // Remove info styling once response is back
 
                 if (response.ok) {
                     if (data.compliance_report) {
-                        reportContent.textContent = JSON.stringify(data.compliance_report, null, 2);
+                        displayComplianceReport(data.compliance_report); // Call new function to format report
                         if (data.compliance_report.is_compliant) {
                             displayMessage(checkMessage, 'Document is compliant! No violations found.', 'success');
                         } else if (data.compliance_report.violations && data.compliance_report.violations.length > 0) {
                             displayMessage(checkMessage, 'Violations found! See report below.', 'error');
                         } else {
-                            // Fallback for unexpected valid JSON structure
                             displayMessage(checkMessage, 'Compliance check completed, but report structure is unusual.', 'info');
                         }
                     } else {
                          displayMessage(checkMessage, `API response missing 'compliance_report' key.`, 'error');
-                         reportContent.textContent = JSON.stringify(data, null, 2);
+                         reportContentDiv.textContent = JSON.stringify(data, null, 2); // Fallback to raw JSON
                     }
                 } else {
                     displayMessage(checkMessage, `Error: ${data.error || 'Unknown compliance check error.'}`, 'error');
-                    reportContent.textContent = JSON.stringify(data, null, 2); // Show raw error response
+                    reportContentDiv.textContent = JSON.stringify(data, null, 2); // Show raw error response
                 }
             } catch (error) {
                 console.error('Network Error during compliance check:', error);
                 displayMessage(checkMessage, `Network Error: ${error.message}. Please check server connection.`, 'error');
-                reportContent.textContent = 'Failed to get report due to network error.';
-                reportContent.classList.remove('info');
+                reportContentDiv.textContent = 'Failed to get report due to network error.';
+                reportContentDiv.classList.remove('info');
             }
         });
+
+        // --- New Function: Display Formatted Compliance Report ---
+        function displayComplianceReport(report) {
+            reportContentDiv.innerHTML = ''; // Clear previous content
+
+            const summaryDiv = document.createElement('div');
+            summaryDiv.className = 'compliance-summary';
+
+            if (report.is_compliant) {
+                summaryDiv.classList.add('compliant-status');
+                summaryDiv.textContent = 'Status: ✅ Document is Compliant!';
+            } else {
+                summaryDiv.classList.add('non-compliant-status');
+                summaryDiv.textContent = 'Status: ❌ Document is NON-Compliant!';
+            }
+            reportContentDiv.appendChild(summaryDiv);
+
+            if (report.violations && report.violations.length > 0) {
+                const violationsHeader = document.createElement('h4');
+                violationsHeader.className = 'text-lg font-semibold mt-4 mb-2 text-gray-700';
+                violationsHeader.textContent = `Details of ${report.violations.length} Violation(s):`;
+                reportContentDiv.appendChild(violationsHeader);
+
+                report.violations.forEach((violation, index) => {
+                    const violationDiv = document.createElement('div');
+                    violationDiv.className = 'violation-item';
+                    violationDiv.innerHTML = `
+                        <h4 class="text-md">Violation ${index + 1}:</h4>
+                        <p><strong>Rule Violated:</strong> ${violation.rule_violated || 'N/A'}</p>
+                        <p><strong>Violating Text:</strong> <span class="bg-red-100 p-1 rounded">${violation.violating_text || 'N/A'}</span></p>
+                        <p><strong>Suggestion:</strong> ${violation.suggestion || 'No suggestion provided.'}</p>
+                    `;
+                    reportContentDiv.appendChild(violationDiv);
+                });
+            } else if (report.is_compliant) {
+                const noViolationsMsg = document.createElement('p');
+                noViolationsMsg.className = 'text-center text-gray-600 mt-4';
+                noViolationsMsg.textContent = 'Great! No specific violations were identified based on the policies.';
+                reportContentDiv.appendChild(noViolationsMsg);
+            } else {
+                // This case handles if is_compliant is false but violations array is empty or missing
+                const unknownViolationMsg = document.createElement('p');
+                unknownViolationMsg.className = 'text-center text-red-600 mt-4';
+                unknownViolationMsg.textContent = 'Document is non-compliant, but no specific violation details were provided by the AI.';
+                reportContentDiv.appendChild(unknownViolationMsg);
+            }
+        }
+
 
         // --- Initialize: Fetch policies when the page loads ---
         document.addEventListener('DOMContentLoaded', fetchPolicies);
